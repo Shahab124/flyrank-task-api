@@ -74,26 +74,55 @@ def create_task(payload: TaskCreate):
     return dict(row)
 
 
-@app.put("/tasks/{task_id}")
+@app.put("/tasks/{task_id}", response_model=Task, summary="Update a task")
 def update_task(task_id: int, payload: TaskUpdate):
-    for task in tasks:
-        if task["id"] == task_id:
-            if payload.title is None and payload.done is None:
-                raise HTTPException(status_code=400, detail="Nothing to update")
-            if payload.title is not None:
-                title = payload.title.strip()
-                if not title:
-                    raise HTTPException(status_code=400, detail="Title must not be empty")
-                task["title"] = title
-            if payload.done is not None:
-                task["done"] = payload.done
-            return task
-    raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    """Update a task's title and/or done flag. 404 if unknown, 400 if nothing to update."""
+    if payload.title is None and payload.done is None:
+        raise HTTPException(status_code=400, detail="Nothing to update")
 
-@app.delete("/tasks/{task_id}", status_code=204)
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
+    ).fetchone()
+
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    title = row["title"]
+    done = row["done"]
+
+    if payload.title is not None:
+        title = payload.title.strip()
+        if not title:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Title must not be empty")
+
+    if payload.done is not None:
+        done = 1 if payload.done else 0
+
+    conn.execute(
+        "UPDATE tasks SET title = ?, done = ? WHERE id = ?", (title, done, task_id)
+    )
+    conn.commit()
+
+    updated = conn.execute(
+        "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
+    ).fetchone()
+    conn.close()
+
+    return dict(updated)
+
+
+@app.delete("/tasks/{task_id}", status_code=204, summary="Delete a task")
 def delete_task(task_id: int):
-    for index, task in enumerate(tasks):
-        if task["id"] == task_id:
-            tasks.pop(index)
-            return Response(status_code=204)
-    raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    """Delete a task by id. Returns 204 with no body, or 404 if unknown."""
+    conn = get_conn()
+    cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return Response(status_code=204)
