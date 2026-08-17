@@ -34,24 +34,25 @@ def health_check():
 @app.get("/tasks", response_model=list[Task], summary="List all tasks")
 def list_tasks():
     """Return every task in the database."""
-    conn = get_conn()
-    rows = conn.execute("SELECT id, title, done FROM tasks").fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title, done FROM tasks ORDER BY id")
+            return cur.fetchall()
 
 
 @app.get("/tasks/{task_id}", response_model=Task, summary="Get one task")
 def get_task(task_id: int):
     """Return a single task by id. Returns 404 if it does not exist."""
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
-    ).fetchone()
-    conn.close()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, title, done FROM tasks WHERE id = %s", (task_id,)
+            )
+            row = cur.fetchone()
 
     if row is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    return dict(row)
+    return row
 
 @app.post("/tasks", response_model=Task, status_code=201, summary="Create a task")
 def create_task(payload: TaskCreate):
