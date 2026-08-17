@@ -1,36 +1,39 @@
-import sqlite3
+import os
 
-DB_FILE = "tasks.db"
+import psycopg
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row)
 
 
 def init_db():
-    conn = get_conn()
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS tasks (
-            id    INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT    NOT NULL,
-            done  INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id    SERIAL PRIMARY KEY,
+                    title TEXT    NOT NULL,
+                    done  BOOLEAN NOT NULL DEFAULT FALSE
+                )
+                """
+            )
 
-    count = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
-    if count == 0:
-        conn.executemany(
-            "INSERT INTO tasks (title, done) VALUES (?, ?)",
-            [
-                ("Read the assignment brief", 1),
-                ("Build the CRUD API", 0),
-                ("Write the README", 0),
-            ],
-        )
+            cur.execute("SELECT COUNT(*) AS n FROM tasks")
+            count = cur.fetchone()["n"]
 
-    conn.commit()
-    conn.close()
+            if count == 0:
+                cur.executemany(
+                    "INSERT INTO tasks (title, done) VALUES (%s, %s)",
+                    [
+                        ("Read the assignment brief", True),
+                        ("Build the CRUD API", False),
+                        ("Write the README", False),
+                    ],
+                )
