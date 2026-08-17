@@ -1,5 +1,6 @@
 from fastapi import FastAPI,HTTPException, Response
 from pydantic import BaseModel
+from db import get_conn, init_db
 
 class TaskCreate(BaseModel):
     title: str
@@ -10,11 +11,7 @@ class TaskUpdate(BaseModel):
     done: bool | None = None
 
 app = FastAPI(title="Task API", version="1.0")
-tasks = [
-    {"id": 1, "title": "Read the assignment brief", "done": True},
-    {"id": 2, "title": "Build the CRUD API", "done": False},
-    {"id": 3, "title": "Write the README", "done": False},
-]
+init_db()
 
 @app.get("/")
 def read_root():
