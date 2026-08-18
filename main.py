@@ -61,19 +61,14 @@ def create_task(payload: TaskCreate):
     if not title:
         raise HTTPException(status_code=400, detail="Title must not be empty")
 
-    conn = get_conn()
-    cursor = conn.execute(
-        "INSERT INTO tasks (title, done) VALUES (?, ?)", (title, 0)
-    )
-    conn.commit()
-    new_id = cursor.lastrowid
-    row = conn.execute(
-        "SELECT id, title, done FROM tasks WHERE id = ?", (new_id,)
-    ).fetchone()
-    conn.close()
-
-    return dict(row)
-
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO tasks (title, done) VALUES (%s, %s) "
+                "RETURNING id, title, done",
+                (title, False),
+            )
+            return cur.fetchone()
 
 @app.put("/tasks/{task_id}", response_model=Task, summary="Update a task")
 def update_task(task_id: int, payload: TaskUpdate):
@@ -81,48 +76,39 @@ def update_task(task_id: int, payload: TaskUpdate):
     if payload.title is None and payload.done is None:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
-    ).fetchone()
+    if payload.title is not None and not payload.title.strip():
+        raise HTTPException(status_code=400, detail="Title must not be empty")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tasks
+                SET title = COALESCE(%s, title),
+                    done  = COALESCE(%s, done)
+                WHERE id = %s
+                RETURNING id, title, done
+                """,
+                (
+                    payload.title.strip() if payload.title is not None else None,
+                    payload.done,
+                    task_id,
+                ),
+            )
+            row = cur.fetchone()
 
     if row is None:
-        conn.close()
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-
-    title = row["title"]
-    done = row["done"]
-
-    if payload.title is not None:
-        title = payload.title.strip()
-        if not title:
-            conn.close()
-            raise HTTPException(status_code=400, detail="Title must not be empty")
-
-    if payload.done is not None:
-        done = 1 if payload.done else 0
-
-    conn.execute(
-        "UPDATE tasks SET title = ?, done = ? WHERE id = ?", (title, done, task_id)
-    )
-    conn.commit()
-
-    updated = conn.execute(
-        "SELECT id, title, done FROM tasks WHERE id = ?", (task_id,)
-    ).fetchone()
-    conn.close()
-
-    return dict(updated)
+    return row
 
 
 @app.delete("/tasks/{task_id}", status_code=204, summary="Delete a task")
 def delete_task(task_id: int):
     """Delete a task by id. Returns 204 with no body, or 404 if unknown."""
-    conn = get_conn()
-    cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    conn.commit()
-    deleted = cursor.rowcount
-    conn.close()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
+            deleted = cur.rowcount
 
     if deleted == 0:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
